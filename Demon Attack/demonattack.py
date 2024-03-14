@@ -14,7 +14,8 @@ from stable_baselines3.common.atari_wrappers import (ClipRewardEnv, EpisodicLife
                                                      FireResetEnv, MaxAndSkipEnv, NoopResetEnv,)
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
-os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"  # You need to change this to your specific path
+from torch.cuda.amp import GradScaler, autocast
+# os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"  # You need to change this to your specific path
 
 
 @dataclass
@@ -35,21 +36,21 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "ALE/DemonAttack-v5"
     """the id of the environment"""
-    total_timesteps: int = 300000
+    total_timesteps: int = 1000000
     """total timesteps of the experiments"""
-    learning_rate: float = 1e-5
+    learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 5000
+    buffer_size: int = 100000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
     tau: float = 1.0
     """the target network update rate"""
-    target_network_frequency: int = 1000
+    target_network_frequency: int = 5000
     """the timesteps it takes to update the target network"""
-    batch_size: int = 32
+    batch_size: int = 128
     """the batch size of sample from the reply memory"""
     start_e: float = 1
     """the starting epsilon for exploration"""
@@ -57,7 +58,7 @@ class Args:
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.10
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 50000
+    learning_starts: int = 20000
     """timestep to start learning"""
     train_frequency: int = 4
     """the frequency of training"""
@@ -115,7 +116,6 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 
 if __name__ == "__main__":
-    print(torch.cuda.is_available())
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -133,6 +133,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print("Device: " + str(device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -142,6 +143,8 @@ if __name__ == "__main__":
 
     q_network = QNetwork(envs).to(device)
     optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
+    scaler = GradScaler()
+
     target_network = QNetwork(envs).to(device)
     target_network.load_state_dict(q_network.state_dict())
 
@@ -163,8 +166,9 @@ if __name__ == "__main__":
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
-            q_values = q_network(torch.Tensor(obs).to(device))
-            actions = torch.argmax(q_values, dim=1).cpu().numpy()
+            with autocast():
+                q_values = q_network(torch.Tensor(obs).to(device))
+                actions = torch.argmax(q_values, dim=1).cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
@@ -191,22 +195,23 @@ if __name__ == "__main__":
         if global_step > args.learning_starts:
             if global_step % args.train_frequency == 0:
                 data = rb.sample(args.batch_size)
-                with torch.no_grad():
-                    target_max, _ = target_network(data.next_observations).max(dim=1)
-                    td_target = data.rewards.flatten() + args.gamma * target_max * (1 - data.dones.flatten())
-                old_val = q_network(data.observations).gather(1, data.actions).squeeze()
-                loss = F.mse_loss(td_target, old_val)
+                with autocast():
+                    with torch.no_grad():
+                        target_max, _ = target_network(data.next_observations).max(dim=1)
+                        td_target = data.rewards.flatten() + args.gamma * target_max * (1 - data.dones.flatten())
+                    old_val = q_network(data.observations).gather(1, data.actions).squeeze()
+                    loss = F.mse_loss(td_target, old_val)
+
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
 
                 if global_step % 100 == 0:
                     writer.add_scalar("losses/td_loss", loss, global_step)
                     writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-
-                # optimize the model
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
 
             # update target network
             if global_step % args.target_network_frequency == 0:
@@ -216,7 +221,7 @@ if __name__ == "__main__":
                     )
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.demonattack_model"
+        model_path = f"runs/{run_name}/{args.exp_name}.{env_id}_model"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
         from RL.utils.atari_utils import evaluate

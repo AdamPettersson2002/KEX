@@ -14,7 +14,7 @@ from stable_baselines3.common.atari_wrappers import (ClipRewardEnv, EpisodicLife
                                                      FireResetEnv, MaxAndSkipEnv, NoopResetEnv,)
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
-os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"  # You need to change this to your specific path
+# os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"  # You need to change this to your specific path
 
 
 @dataclass
@@ -35,13 +35,13 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "ALE/Breakout-v5"
     """the id of the environment"""
-    total_timesteps: int = 300000
+    total_timesteps: int = 1000000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 2000
+    buffer_size: int = 100000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -49,7 +49,7 @@ class Args:
     """the target network update rate"""
     target_network_frequency: int = 1000
     """the timesteps it takes to update the target network"""
-    batch_size: int = 32
+    batch_size: int = 128
     """the batch size of sample from the reply memory"""
     start_e: float = 1
     """the starting epsilon for exploration"""
@@ -57,7 +57,7 @@ class Args:
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.10
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 10000
+    learning_starts: int = 80000
     """timestep to start learning"""
     train_frequency: int = 4
     """the frequency of training"""
@@ -115,7 +115,7 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 
 if __name__ == "__main__":
-
+    print(torch.cuda.is_available())
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
