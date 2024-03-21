@@ -1,6 +1,6 @@
 # lunarlander.py
 import os
-import gym
+import gymnasium as gym
 from lunarlander_nn import Agent
 from RL.utils.non_atari_utils import plotLearning  # Might have to modify to work with your folder name(s)
 import numpy as np

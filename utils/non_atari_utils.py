@@ -1,7 +1,7 @@
 # non_atari_utils.py
 import matplotlib.pyplot as plt
 import numpy as np
-import gym
+import gymnasium as gym
 
 def plotLearning(x, scores, epsilons, filename, lines=None):
     fig=plt.figure()
@@ -49,7 +49,7 @@ def plotBlackjackLearning(x, scores, epsilons, win_ratios, loss_ratios, draw_rat
     N = len(scores)
     running_avg = np.empty(N)
     for t in range(N):
-        running_avg[t] = np.mean(scores[max(0, t - 50):(t + 1)])
+        running_avg[t] = np.mean(scores[max(0, t - 500):(t + 1)])
 
     axs[1].plot(x, running_avg, label="Running Average of Rewards", color="C1")
     axs[1].set_xlabel("Game")
@@ -146,3 +146,41 @@ def make_env(env_name):
     env = MoveImgChannel(env)
     env = BufferWrapper(env, 4)
     return ScaleFrame(env)
+
+def evaluate(
+    model_path: str,
+    make_env: Callable,
+    env_id: str,
+    eval_episodes: int,
+    run_name: str,
+    Model: torch.nn.Module,
+    device: torch.device = torch.device("cpu"),
+    epsilon: float = 0.05,
+    capture_video: bool = True,
+):
+    envs = gym.vector.SyncVectorEnv([make_env(env_id, 0, 0, capture_video, run_name)])
+    model_data = torch.load(model_path, map_location="cpu")
+    args = Namespace(**model_data["args"])
+    model = Model(envs, n_atoms=args.n_atoms, v_min=args.v_min, v_max=args.v_max)
+    model.load_state_dict(model_data["model_weights"])
+    model = model.to(device)
+    model.eval()
+
+    obs, _ = envs.reset()
+    episodic_returns = []
+    while len(episodic_returns) < eval_episodes:
+        if random.random() < epsilon:
+            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
+        else:
+            actions, _ = model.get_action(torch.Tensor(obs).to(device))
+            actions = actions.cpu().numpy()
+        next_obs, _, _, _, infos = envs.step(actions)
+        if "final_info" in infos:
+            for info in infos["final_info"]:
+                if "episode" not in info:
+                    continue
+                print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
+                episodic_returns += [info["episode"]["r"]]
+        obs = next_obs
+
+    return episodic_returns

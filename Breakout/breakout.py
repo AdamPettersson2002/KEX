@@ -11,11 +11,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 from stable_baselines3.common.atari_wrappers import (ClipRewardEnv, EpisodicLifeEnv,
-                                                     FireResetEnv, MaxAndSkipEnv, NoopResetEnv,)
+                                                     FireResetEnv, MaxAndSkipEnv, NoopResetEnv)
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 # os.environ["IMAGEIO_FFMPEG_EXE"] = "/opt/homebrew/bin/ffmpeg"  # You need to change this to your specific path
-
 
 @dataclass
 class Args:
@@ -23,7 +22,7 @@ class Args:
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment, allows for reproducibility"""
-    torch_deterministic: bool = False
+    torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
@@ -35,13 +34,15 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "ALE/Breakout-v5"
     """the id of the environment"""
-    total_timesteps: int = 1000000
+    frameskip: int = 1
+    """How many frames should be skipped"""
+    total_timesteps: int = 10000000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 100000
+    buffer_size: int = 200000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -49,7 +50,7 @@ class Args:
     """the target network update rate"""
     target_network_frequency: int = 1000
     """the timesteps it takes to update the target network"""
-    batch_size: int = 128
+    batch_size: int = 32
     """the batch size of sample from the reply memory"""
     start_e: float = 1
     """the starting epsilon for exploration"""
@@ -66,10 +67,10 @@ class Args:
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.make(env_id, render_mode="rgb_array", frameskip=1, repeat_action_probability=0)
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
-            env = gym.make(env_id)
+            env = gym.make(env_id, frameskip=1, repeat_action_probability=0)
         env = gym.wrappers.RecordEpisodeStatistics(env)
 
         env = NoopResetEnv(env, noop_max=30)
@@ -115,10 +116,11 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 
 
 if __name__ == "__main__":
-    print(torch.cuda.is_available())
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    total_rewards = []
+    completed_episodes = 0
 
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
@@ -133,6 +135,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print("Device: " + str(device))
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -173,9 +176,20 @@ if __name__ == "__main__":
         if "final_info" in infos:
             for info in infos["final_info"]:
                 if info and "episode" in info:
+                    episode_reward = info["episode"]["r"]
+                    total_rewards.append(episode_reward)
+                    if len(total_rewards) > 50:
+                        total_rewards.pop(0)
+                    completed_episodes += 1
                     print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                     writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                     writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+
+                    if completed_episodes % 10 == 0:
+                        average_reward = sum(total_rewards) / len(total_rewards)
+                        print(
+                            f"Average reward of the last 50 episodes after {completed_episodes} episodes: {average_reward}")
+                        writer.add_scalar("charts/average_reward_last_50", average_reward, global_step)
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()

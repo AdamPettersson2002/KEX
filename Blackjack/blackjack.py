@@ -1,6 +1,6 @@
 # blackjack.py
 import os
-import gym
+import gymnasium as gym
 from blackjack_nn import Agent
 from RL.utils.non_atari_utils import plotBlackjackLearning  # Might have to modify to work with your folder name(s)
 import numpy as np
@@ -11,7 +11,7 @@ if __name__ == '__main__':
                   input_dims=[3], lr=0.001)
     scores, eps_history, wins, losses, draws = [], [], [], [], []
     win_count, loss_count, draw_count, total_games = 0, 0, 0, 0
-    n_games = 20000
+    n_games = 50000
 
     for i in range(n_games):
         score = 0
