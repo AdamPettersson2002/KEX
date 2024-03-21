@@ -1,7 +1,11 @@
 # non_atari_utils.py
+import random
 import matplotlib.pyplot as plt
 import numpy as np
 import gymnasium as gym
+import torch
+from argparse import Namespace
+from typing import Callable
 
 def plotLearning(x, scores, epsilons, filename, lines=None):
     fig=plt.figure()
@@ -37,14 +41,15 @@ def plotLearning(x, scores, epsilons, filename, lines=None):
     plt.savefig(filename)
 
 
-def plotBlackjackLearning(x, scores, epsilons, win_ratios, loss_ratios, draw_ratios, filename):
+def plotBlackjackLearning(x, scores, win_ratios, loss_ratios, draw_ratios, filename, epsilons="no"):
     fig, axs = plt.subplots(2, 1, figsize=(10, 8))
 
-    axs[0].plot(x, epsilons, label="Epsilon", color="C0")
-    axs[0].set_xlabel("Game")
-    axs[0].set_ylabel("Epsilon")
-    axs[0].set_title("Epsilon Decay Over Time")
-    axs[0].legend()
+    if epsilons != "no":
+        axs[0].plot(x, epsilons, label="Epsilon", color="C0")
+        axs[0].set_ylabel("Epsilon")
+        axs[0].set_xlabel("Game")
+        axs[0].set_title("Epsilon Decay Over Time")
+        axs[0].legend()
 
     N = len(scores)
     running_avg = np.empty(N)

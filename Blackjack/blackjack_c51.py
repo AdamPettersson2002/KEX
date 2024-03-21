@@ -1,3 +1,4 @@
+# blackjack_c51.py
 import os
 import random
 import time
@@ -14,6 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import matplotlib.pyplot as plt
 from gymnasium.spaces import Box
+from RL.utils.non_atari_utils import plotBlackjackLearning
 
 @dataclass
 class Args:
@@ -37,7 +39,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Blackjack-v1"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 300000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -49,7 +51,7 @@ class Args:
     """the return lower bound"""
     v_max: float = 100
     """the return upper bound"""
-    buffer_size: int = 10000
+    buffer_size: int = 25000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -105,11 +107,7 @@ class QNetwork(nn.Module):
         if x.ndim == 1:
             x = x.unsqueeze(0)
         logits = self.network(x)
-        batch_size = x.size(0)  # This should now always reflect the correct batch size
-        print("x = :", x)
-        print("Batch size:", batch_size, "Logits size:", logits.size())  # Debugging print
-
-        # Ensure logits are correctly reshaped considering the actual batch size and the architecture
+        batch_size = x.size(0)
         pmfs = torch.softmax(logits.view(batch_size, self.n, self.n_atoms), dim=2)
         q_values = (pmfs * self.atoms).sum(2)
         if action is None:
@@ -166,8 +164,9 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    total_rewards = []
-    completed_episodes = 0
+
+    completed_episodes, win_count, loss_count, draw_count = 0, 0, 0, 0
+    scores, total_rewards, wins, losses, draws, eps_history = [], [], [], [], [], []
 
     distribution_plots_dir = os.path.join("distribution_plots", run_name)
     os.makedirs(distribution_plots_dir, exist_ok=True)
@@ -217,6 +216,7 @@ if __name__ == "__main__":
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
+        eps_history.append(epsilon)
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
@@ -233,9 +233,17 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
             for info in infos["final_info"]:
+                score = 0
                 if info and "episode" in info:
                     episode_reward = info["episode"]["r"]
                     total_rewards.append(episode_reward)
+                    score += episode_reward
+                    if episode_reward == 1:
+                        win_count += 1
+                    elif episode_reward == -1:
+                        loss_count += 1
+                    else:
+                        draw_count += 1
                     if len(total_rewards) > 50:
                         total_rewards.pop(0)
                     completed_episodes += 1
@@ -248,6 +256,13 @@ if __name__ == "__main__":
                         print(
                             f"Average reward of the last 50 episodes after {completed_episodes} episodes: {average_reward}")
                         writer.add_scalar("charts/average_reward_last_50", average_reward, global_step)
+
+                    total_games = win_count + loss_count + draw_count
+                    wins.append(win_count / total_games if total_games > 0 else 0)
+                    losses.append(loss_count / total_games if total_games > 0 else 0)
+                    draws.append(draw_count / total_games if total_games > 0 else 0)
+                    scores.append(score)
+
                     if args.plot_distribution:
                         if completed_episodes % args.plot_intervals == 0 and completed_episodes > 0:
                             obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(device)
@@ -259,19 +274,10 @@ if __name__ == "__main__":
         for idx, trunc in enumerate(truncations):
             if trunc:
                 real_next_obs[idx] = infos["final_observation"][idx]
-        if isinstance(actions, torch.Tensor):
-            actions = actions.cpu().numpy()
-        if isinstance(rewards, torch.Tensor):
-            rewards = rewards.cpu().numpy()
-        if isinstance(terminations, torch.Tensor):
-            terminations = terminations.cpu().numpy()
         obs_cpu = obs.cpu().numpy() if isinstance(obs, torch.Tensor) else obs
-        real_next_obs_cpu = real_next_obs.cpu().numpy() if isinstance(real_next_obs, torch.Tensor) else real_next_obs
         actions_cpu = actions.cpu().numpy() if isinstance(actions, torch.Tensor) else actions
-        rewards_cpu = rewards.cpu().numpy() if isinstance(rewards, torch.Tensor) else rewards
-        terminations_cpu = terminations.cpu().numpy() if isinstance(terminations, torch.Tensor) else terminations
 
-        rb.add(obs_cpu, real_next_obs_cpu, actions_cpu, rewards_cpu, terminations_cpu, infos)
+        rb.add(obs_cpu, real_next_obs, actions_cpu, rewards, terminations, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
@@ -340,6 +346,14 @@ if __name__ == "__main__":
         )
         for idx, episodic_return in enumerate(episodic_returns):
             writer.add_scalar("eval/episodic_return", episodic_return, idx)
+
+    x = [i + 1 for i in range(total_games)]
+    folder_path = 'plots/'
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+
+    filename = folder_path + 'blackjack_c51.png'
+    plotBlackjackLearning(x, scores, wins, losses, draws, filename)
 
     envs.close()
     writer.close()

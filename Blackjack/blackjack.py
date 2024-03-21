@@ -53,6 +53,6 @@ if __name__ == '__main__':
         os.makedirs(folder_path)
 
     filename = folder_path + 'blackjack.png'
-    plotBlackjackLearning(x, scores, eps_history, wins, losses, draws, filename)
+    plotBlackjackLearning(x, scores, wins, losses, draws, filename, epsilons=eps_history)
 
     env.close()
