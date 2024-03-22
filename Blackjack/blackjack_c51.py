@@ -25,7 +25,7 @@ class Args:
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = True
+    cuda: bool = False
     """if toggled, cuda will be enabled by default"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
@@ -39,7 +39,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Blackjack-v1"
     """the id of the environment"""
-    total_timesteps: int = 300000
+    total_timesteps: int = 10000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -51,7 +51,7 @@ class Args:
     """the return lower bound"""
     v_max: float = 100
     """the return upper bound"""
-    buffer_size: int = 25000
+    buffer_size: int = 2500
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -65,7 +65,7 @@ class Args:
     """the ending epsilon for exploration"""
     exploration_fraction: float = 0.5
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 10000
+    learning_starts: int = 1000
     """timestep to start learning"""
     train_frequency: int = 10
     """the frequency of training"""
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
-    completed_episodes, win_count, loss_count, draw_count = 0, 0, 0, 0
+    completed_episodes, win_count, loss_count, draw_count, score = 0, 0, 0, 0, 0
     scores, total_rewards, wins, losses, draws, eps_history = [], [], [], [], [], []
 
     distribution_plots_dir = os.path.join("distribution_plots", run_name)
@@ -233,7 +233,6 @@ if __name__ == "__main__":
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
             for info in infos["final_info"]:
-                score = 0
                 if info and "episode" in info:
                     episode_reward = info["episode"]["r"]
                     total_rewards.append(episode_reward)
@@ -262,6 +261,7 @@ if __name__ == "__main__":
                     losses.append(loss_count / total_games if total_games > 0 else 0)
                     draws.append(draw_count / total_games if total_games > 0 else 0)
                     scores.append(score)
+                    score = 0
 
                     if args.plot_distribution:
                         if completed_episodes % args.plot_intervals == 0 and completed_episodes > 0:
